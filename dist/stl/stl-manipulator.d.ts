@@ -48,7 +48,17 @@ export declare class STLManipulator extends EventEmitter {
         boundingBox: BoundingBox;
         vertexCount: number;
         faceCount: number;
+        objects?: Array<{
+            name: string;
+            vertexCount: number;
+            faceCount: number;
+            boundingBox: BoundingBox;
+        }>;
     }>;
+    /**
+     * Extract mesh info from a 3MF file by parsing the XML object models.
+     */
+    private get3MFInfo;
     /**
      * Scale an STL model uniformly or along specific axes
      */

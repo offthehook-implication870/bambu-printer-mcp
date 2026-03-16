@@ -85,8 +85,12 @@ export class STLManipulator extends EventEmitter {
      */
     async getSTLInfo(stlFilePath) {
         try {
-            const { geometry, boundingBox } = await this.loadSTL(stlFilePath);
             const fileStats = fs.statSync(stlFilePath);
+            // Handle 3MF files: extract mesh data from embedded object models
+            if (stlFilePath.toLowerCase().endsWith('.3mf')) {
+                return await this.get3MFInfo(stlFilePath, fileStats.size);
+            }
+            const { geometry, boundingBox } = await this.loadSTL(stlFilePath);
             // Count faces (each face is a triangle in STL)
             const positionAttribute = geometry.getAttribute('position');
             const vertexCount = positionAttribute.count;
@@ -114,6 +118,89 @@ export class STLManipulator extends EventEmitter {
             console.error("Error getting STL info:", error);
             throw new Error(`Failed to get STL info: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+    /**
+     * Extract mesh info from a 3MF file by parsing the XML object models.
+     */
+    async get3MFInfo(filePath, fileSize) {
+        const JSZip = (await import('jszip')).default;
+        const data = fs.readFileSync(filePath);
+        const zip = await JSZip.loadAsync(data);
+        // Find all object model files
+        const objectFiles = Object.keys(zip.files).filter((name) => /^3D\/Objects\/.*\.model$/i.test(name));
+        const overallBox = new THREE.Box3(new THREE.Vector3(Infinity, Infinity, Infinity), new THREE.Vector3(-Infinity, -Infinity, -Infinity));
+        let totalVerts = 0;
+        let totalFaces = 0;
+        const objects = [];
+        for (const objFile of objectFiles) {
+            const content = await zip.file(objFile).async('string');
+            // Parse vertices from XML: <vertex x="..." y="..." z="..."/>
+            const vertexRegex = /<(?:\w+:)?vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"/g;
+            const triangleRegex = /<(?:\w+:)?triangle\s/g;
+            const objBox = new THREE.Box3(new THREE.Vector3(Infinity, Infinity, Infinity), new THREE.Vector3(-Infinity, -Infinity, -Infinity));
+            let vCount = 0;
+            let match;
+            while ((match = vertexRegex.exec(content)) !== null) {
+                const x = parseFloat(match[1]);
+                const y = parseFloat(match[2]);
+                const z = parseFloat(match[3]);
+                objBox.expandByPoint(new THREE.Vector3(x, y, z));
+                overallBox.expandByPoint(new THREE.Vector3(x, y, z));
+                vCount++;
+            }
+            let fCount = 0;
+            while (triangleRegex.exec(content) !== null)
+                fCount++;
+            totalVerts += vCount;
+            totalFaces += fCount;
+            if (vCount > 0) {
+                const center = new THREE.Vector3();
+                objBox.getCenter(center);
+                const dims = new THREE.Vector3();
+                objBox.getSize(dims);
+                objects.push({
+                    name: path.basename(objFile),
+                    vertexCount: vCount,
+                    faceCount: fCount,
+                    boundingBox: { min: objBox.min, max: objBox.max, center, dimensions: dims },
+                });
+            }
+        }
+        // If no object files found, try the main 3dmodel.model
+        if (objects.length === 0) {
+            const mainModel = zip.file('3D/3dmodel.model');
+            if (mainModel) {
+                const content = await mainModel.async('string');
+                const vertexRegex = /<(?:\w+:)?vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"/g;
+                const triangleRegex = /<(?:\w+:)?triangle\s/g;
+                let match;
+                while ((match = vertexRegex.exec(content)) !== null) {
+                    const x = parseFloat(match[1]);
+                    const y = parseFloat(match[2]);
+                    const z = parseFloat(match[3]);
+                    overallBox.expandByPoint(new THREE.Vector3(x, y, z));
+                    totalVerts++;
+                }
+                while (triangleRegex.exec(content) !== null)
+                    totalFaces++;
+            }
+        }
+        if (totalVerts === 0) {
+            throw new Error('No mesh data found in 3MF file. The archive may not contain any 3D objects.');
+        }
+        const center = new THREE.Vector3();
+        overallBox.getCenter(center);
+        const dimensions = new THREE.Vector3();
+        overallBox.getSize(dimensions);
+        return {
+            filePath,
+            fileName: path.basename(filePath),
+            fileSize,
+            boundingBox: { min: overallBox.min, max: overallBox.max, center, dimensions },
+            vertexCount: totalVerts,
+            faceCount: totalFaces,
+            objects,
+        };
     }
     /**
      * Scale an STL model uniformly or along specific axes
@@ -728,12 +815,15 @@ export class STLManipulator extends EventEmitter {
                         if (slicerProfile) {
                             args.push('--load-settings', slicerProfile);
                         }
-                        // CRITICAL: Pass printer preset so slicer generates correct G-code
-                        // for the target printer model. Without this, the slicer uses its
-                        // default which may be a completely different printer, causing
-                        // dangerous bed crashes or axis limit violations.
+                        // Always allow newer-version 3MF files (the CLI rejects them by default)
+                        args.push('--allow-newer-file');
+                        // If a printer preset name is given AND no explicit profile was provided,
+                        // write a minimal settings JSON containing the printer_settings_id so
+                        // BambuStudio resolves the correct machine profile from its built-in presets.
                         if (printerPreset && !slicerProfile) {
-                            args.push('--load-machine', printerPreset);
+                            const presetJson = path.join(this.tempDir, '_printer_preset.json');
+                            fs.writeFileSync(presetJson, JSON.stringify({ printer_settings_id: printerPreset }));
+                            args.push('--load-settings', presetJson);
                         }
                         args.push(stlFilePath);
                         // Override outputFilePath for bambustudio since it produces 3MF, not gcode
