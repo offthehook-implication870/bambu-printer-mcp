@@ -40,6 +40,28 @@ export type TransformationParams = {
   selectionBounds?: THREE.Box3;
 };
 
+// BambuStudio CLI flags exposed via the slice_stl tool
+export interface BambuSliceOptions {
+  uptodate?: boolean;          // --uptodate: update 3MF configs to latest presets
+  repetitions?: number;        // --repetitions N: print N copies
+  orient?: boolean;            // --orient 1: auto-orient for printability
+  arrange?: boolean;           // --arrange 1: auto-arrange objects on plate
+  ensureOnBed?: boolean;       // --ensure-on-bed: lift floating models onto bed
+  cloneObjects?: string;       // --clone-objects "1,3,1,10": clone counts per object
+  skipObjects?: string;        // --skip-objects "3,5,10": skip specific objects
+  loadFilaments?: string;      // --load-filaments "f1.json;f2.json": filament profiles
+  loadFilamentIds?: string;    // --load-filament-ids "1,2,3,1": filament-to-object mapping
+  enableTimelapse?: boolean;   // --enable-timelapse: timelapse-aware slicing
+  allowMixTemp?: boolean;      // --allow-mix-temp: allow mixed-temp filaments
+  scale?: number;              // --scale factor: uniform scale
+  rotate?: number;             // --rotate degrees: Z-axis rotation
+  rotateX?: number;            // --rotate-x degrees
+  rotateY?: number;            // --rotate-y degrees
+  minSave?: boolean;           // --min-save: smaller output 3MF
+  skipModifiedGcodes?: boolean;// --skip-modified-gcodes: ignore stale custom gcodes
+  slicePlate?: number;         // --slice N: which plate (default: 0 = all)
+}
+
 export class STLManipulator extends EventEmitter {
   private tempDir: string;
   private activeOperations: Map<string, boolean> = new Map();
@@ -966,6 +988,7 @@ export class STLManipulator extends EventEmitter {
    * @param slicerProfile Optional path to the slicer profile/config file
    * @param progressCallback Optional callback for progress updates
    * @param printerPreset Optional BambuStudio printer preset name (e.g., "Bambu Lab P1S 0.4 nozzle")
+   * @param bambuOptions Optional BambuStudio-specific CLI flags
    * @returns Path to the generated G-code or sliced 3MF file
    */
   async sliceSTL(
@@ -974,7 +997,8 @@ export class STLManipulator extends EventEmitter {
     slicerPath: string,
     slicerProfile?: string,
     progressCallback?: ProgressCallback,
-    printerPreset?: string
+    printerPreset?: string,
+    bambuOptions?: BambuSliceOptions
   ): Promise<string> {
     const operationId = this.generateOperationId();
     this.activeOperations.set(operationId, true);
@@ -1051,7 +1075,7 @@ export class STLManipulator extends EventEmitter {
             const outputBase = path.basename(stlFilePath, is3mf ? '.3mf' : '.stl');
             const bambuOutputPath = path.join(this.tempDir, outputBase + '_sliced.3mf');
             args = [
-              '--slice', '0',  // Slice all plates
+              '--slice', String(bambuOptions?.slicePlate ?? 0),
               '--export-3mf', bambuOutputPath,
             ];
             if (slicerProfile) {
@@ -1068,6 +1092,26 @@ export class STLManipulator extends EventEmitter {
               fs.writeFileSync(presetJson, JSON.stringify({ printer_settings_id: printerPreset }));
               args.push('--load-settings', presetJson);
             }
+
+            // BambuSliceOptions flags
+            if (bambuOptions?.uptodate) args.push('--uptodate');
+            if (bambuOptions?.ensureOnBed) args.push('--ensure-on-bed');
+            if (bambuOptions?.enableTimelapse) args.push('--enable-timelapse');
+            if (bambuOptions?.allowMixTemp) args.push('--allow-mix-temp');
+            if (bambuOptions?.minSave) args.push('--min-save');
+            if (bambuOptions?.skipModifiedGcodes) args.push('--skip-modified-gcodes');
+            if (bambuOptions?.orient !== undefined) args.push('--orient', bambuOptions.orient ? '1' : '0');
+            if (bambuOptions?.arrange !== undefined) args.push('--arrange', bambuOptions.arrange ? '1' : '0');
+            if (bambuOptions?.repetitions !== undefined) args.push('--repetitions', String(bambuOptions.repetitions));
+            if (bambuOptions?.scale !== undefined) args.push('--scale', String(bambuOptions.scale));
+            if (bambuOptions?.rotate !== undefined) args.push('--rotate', String(bambuOptions.rotate));
+            if (bambuOptions?.rotateX !== undefined) args.push('--rotate-x', String(bambuOptions.rotateX));
+            if (bambuOptions?.rotateY !== undefined) args.push('--rotate-y', String(bambuOptions.rotateY));
+            if (bambuOptions?.cloneObjects) args.push('--clone-objects', bambuOptions.cloneObjects);
+            if (bambuOptions?.skipObjects) args.push('--skip-objects', bambuOptions.skipObjects);
+            if (bambuOptions?.loadFilaments) args.push('--load-filaments', bambuOptions.loadFilaments);
+            if (bambuOptions?.loadFilamentIds) args.push('--load-filament-ids', bambuOptions.loadFilamentIds);
+
             args.push(stlFilePath);
             // Override outputFilePath for bambustudio since it produces 3MF, not gcode
             outputFilePath = bambuOutputPath;

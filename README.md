@@ -716,6 +716,53 @@ Slice an STL or 3MF file using an external slicer and return the path to the out
 
 For printing on a Bambu printer, the recommended workflow is: slice with `bambustudio` to get a sliced 3MF, then pass that output path to `print_3mf`.
 
+#### BambuStudio Slicer Options
+
+When `slicer_type` is `bambustudio` (the default), these additional parameters are available on `slice_stl`:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `uptodate` | boolean | Update 3MF configs to latest BambuStudio presets |
+| `repetitions` | number | Number of copies to print |
+| `orient` | boolean | Auto-orient model for optimal printability |
+| `arrange` | boolean | Auto-arrange objects on the build plate |
+| `ensure_on_bed` | boolean | Lift floating models onto the bed |
+| `clone_objects` | string | Clone counts per object, comma-separated (e.g. `"1,3,1,10"`) |
+| `skip_objects` | string | Object indices to skip, comma-separated (e.g. `"3,5,10"`) |
+| `load_filaments` | string | Filament profile paths, semicolon-separated |
+| `load_filament_ids` | string | Filament-to-object mapping, comma-separated |
+| `enable_timelapse` | boolean | Enable timelapse-aware slicing |
+| `allow_mix_temp` | boolean | Allow mixed-temperature filaments on one plate |
+| `scale` | number | Uniform scale factor |
+| `rotate` | number | Z-axis rotation in degrees |
+| `rotate_x` | number | X-axis rotation in degrees |
+| `rotate_y` | number | Y-axis rotation in degrees |
+| `min_save` | boolean | Produce smaller output 3MF (faster uploads) |
+| `skip_modified_gcodes` | boolean | Ignore stale custom gcodes in the 3MF |
+| `slice_plate` | number | Which plate to slice (0 = all plates, default: 0) |
+
+**Example: Slice with auto-orient and 3 copies**
+```json
+{
+  "stl_path": "/path/to/model.stl",
+  "bambu_model": "p1s",
+  "orient": true,
+  "arrange": true,
+  "repetitions": 3
+}
+```
+
+#### Smart Defaults (print_3mf auto-slice)
+
+When `print_3mf` detects an unsliced 3MF and auto-slices it, these defaults are applied automatically:
+
+- `uptodate: true` -- prevents stale config bugs from downloaded 3MFs
+- `ensure_on_bed: true` -- safety net, lifts floating models onto the bed
+- `min_save: true` -- smaller output for faster FTP uploads to the printer
+- `skip_modified_gcodes: true` -- strips custom gcodes from other users' profiles
+
+These defaults keep you safe when printing downloaded models. When calling `slice_stl` directly, you have full control over every flag.
+
 </details>
 
 <details>

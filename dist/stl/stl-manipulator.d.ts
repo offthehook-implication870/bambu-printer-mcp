@@ -22,6 +22,26 @@ export type TransformationParams = {
     relative?: boolean;
     selectionBounds?: THREE.Box3;
 };
+export interface BambuSliceOptions {
+    uptodate?: boolean;
+    repetitions?: number;
+    orient?: boolean;
+    arrange?: boolean;
+    ensureOnBed?: boolean;
+    cloneObjects?: string;
+    skipObjects?: string;
+    loadFilaments?: string;
+    loadFilamentIds?: string;
+    enableTimelapse?: boolean;
+    allowMixTemp?: boolean;
+    scale?: number;
+    rotate?: number;
+    rotateX?: number;
+    rotateY?: number;
+    minSave?: boolean;
+    skipModifiedGcodes?: boolean;
+    slicePlate?: number;
+}
 export declare class STLManipulator extends EventEmitter {
     private tempDir;
     private activeOperations;
@@ -107,9 +127,10 @@ export declare class STLManipulator extends EventEmitter {
      * @param slicerProfile Optional path to the slicer profile/config file
      * @param progressCallback Optional callback for progress updates
      * @param printerPreset Optional BambuStudio printer preset name (e.g., "Bambu Lab P1S 0.4 nozzle")
+     * @param bambuOptions Optional BambuStudio-specific CLI flags
      * @returns Path to the generated G-code or sliced 3MF file
      */
-    sliceSTL(stlFilePath: string, slicerType: 'prusaslicer' | 'cura' | 'slic3r' | 'orcaslicer' | 'bambustudio', slicerPath: string, slicerProfile?: string, progressCallback?: ProgressCallback, printerPreset?: string): Promise<string>;
+    sliceSTL(stlFilePath: string, slicerType: 'prusaslicer' | 'cura' | 'slic3r' | 'orcaslicer' | 'bambustudio', slicerPath: string, slicerProfile?: string, progressCallback?: ProgressCallback, printerPreset?: string, bambuOptions?: BambuSliceOptions): Promise<string>;
     /**
      * Enhanced version of confirmTemperatures with better error handling
      * @param gcodePath Path to the G-code file

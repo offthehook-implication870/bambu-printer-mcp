@@ -94,6 +94,30 @@ function assertBambuStudioSlicerSupport(listToolsResult) {
   );
 }
 
+// Canonical schema contracts for BambuStudio slicer options on slice_stl.
+// Each entry: [property_name, expected_json_type, description_must_contain]
+// Description fragments should be domain-stable keywords, not exact phrasing.
+const BAMBU_SLICER_OPTION_CONTRACTS = [
+  ["uptodate",              "boolean", "preset"],
+  ["repetitions",           "number",  "copies"],
+  ["orient",                "boolean", "orient"],
+  ["arrange",               "boolean", "arrange"],
+  ["ensure_on_bed",         "boolean", "bed"],
+  ["clone_objects",         "string",  "clone"],
+  ["skip_objects",          "string",  "skip"],
+  ["load_filaments",        "string",  "filament"],
+  ["load_filament_ids",     "string",  "filament"],
+  ["enable_timelapse",      "boolean", "timelapse"],
+  ["allow_mix_temp",        "boolean", "temperature"],
+  ["scale",                 "number",  "scale"],
+  ["rotate",                "number",  "z-axis"],
+  ["rotate_x",              "number",  "x-axis"],
+  ["rotate_y",              "number",  "y-axis"],
+  ["min_save",              "boolean", "smaller"],
+  ["skip_modified_gcodes",  "boolean", "gcode"],
+  ["slice_plate",           "number",  "plate"],
+];
+
 test("printer model safety: schema requires bambu_model, rejects missing/invalid models", async (t) => {
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -340,4 +364,106 @@ test("streamable-http transport: initialize, list tools, call success + origin r
 
   const wrongPathResponse = await fetch(`http://127.0.0.1:${port}/not-mcp`, { method: "POST" });
   assert.equal(wrongPathResponse.status, 404);
+});
+
+test("slice_stl schema: all BambuStudio slicer options present with correct types and descriptions", async (t) => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER_ENTRY],
+    env: {
+      ...process.env,
+      MCP_TRANSPORT: "stdio",
+      BAMBU_MODEL: "p1s",
+    },
+    stderr: "pipe",
+  });
+
+  const client = createClient();
+  t.after(async () => { await closeTransport(transport); });
+
+  await client.connect(transport);
+
+  const listToolsResult = await client.listTools();
+  const sliceTool = listToolsResult.tools.find((t) => t.name === "slice_stl");
+  assert.ok(sliceTool, "slice_stl tool must exist");
+
+  const props = sliceTool.inputSchema?.properties || {};
+
+  // Matrix test: every BambuStudio slicer option must be present, typed correctly,
+  // and have a meaningful description.
+  for (const [propName, expectedType, descFragment] of BAMBU_SLICER_OPTION_CONTRACTS) {
+    assert.ok(
+      props[propName],
+      `slice_stl must have property "${propName}"`
+    );
+    assert.equal(
+      props[propName].type,
+      expectedType,
+      `slice_stl.${propName} must be type "${expectedType}", got "${props[propName].type}"`
+    );
+    assert.ok(
+      props[propName].description?.toLowerCase().includes(descFragment),
+      `slice_stl.${propName} description must mention "${descFragment}", got: "${props[propName].description}"`
+    );
+  }
+
+  // Original core params must still be present (regression guard)
+  for (const coreParam of ["stl_path", "bambu_model", "slicer_type", "slicer_path", "slicer_profile", "nozzle_diameter"]) {
+    assert.ok(props[coreParam], `slice_stl must retain core property "${coreParam}"`);
+  }
+
+  // bambu_model and stl_path must remain required
+  assert.ok(
+    sliceTool.inputSchema.required.includes("bambu_model"),
+    "bambu_model must be required"
+  );
+  assert.ok(
+    sliceTool.inputSchema.required.includes("stl_path"),
+    "stl_path must be required"
+  );
+
+  // New slicer options must NOT be required (they are all optional)
+  for (const [propName] of BAMBU_SLICER_OPTION_CONTRACTS) {
+    assert.ok(
+      !sliceTool.inputSchema.required?.includes(propName),
+      `Slicer option "${propName}" must not be required`
+    );
+  }
+});
+
+test("tool schema invariant: every tool property has a description", async (t) => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER_ENTRY],
+    env: {
+      ...process.env,
+      MCP_TRANSPORT: "stdio",
+      BAMBU_MODEL: "p1s",
+    },
+    stderr: "pipe",
+  });
+
+  const client = createClient();
+  t.after(async () => { await closeTransport(transport); });
+
+  await client.connect(transport);
+
+  const listToolsResult = await client.listTools();
+
+  // Every tool must have a description, and every property must have a description.
+  // This is critical for LLM tool-use (codemode) -- missing descriptions degrade tool selection.
+  for (const tool of listToolsResult.tools) {
+    assert.ok(
+      tool.description && tool.description.length > 10,
+      `Tool "${tool.name}" must have a meaningful description`
+    );
+
+    const props = tool.inputSchema?.properties || {};
+    for (const [propName, propSchema] of Object.entries(props)) {
+      assert.ok(
+        propSchema.description && propSchema.description.length > 5,
+        `${tool.name}.${propName} must have a description (got: "${propSchema.description || ""}")`
+      );
+    }
+  }
 });

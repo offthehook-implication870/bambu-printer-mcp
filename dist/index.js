@@ -333,7 +333,25 @@ class BambuPrinterMCPServer {
                                 },
                                 slicer_path: { type: "string", description: "Path to the slicer executable (default: value from env)" },
                                 slicer_profile: { type: "string", description: "Path to the slicer profile/config file (optional, overrides bambu_model preset)" },
-                                nozzle_diameter: { type: "string", description: "Nozzle diameter in mm (default: 0.4)" }
+                                nozzle_diameter: { type: "string", description: "Nozzle diameter in mm (default: 0.4)" },
+                                uptodate: { type: "boolean", description: "Refresh 3MF preset configs to match the latest BambuStudio version. Use when slicing downloaded or older 3MF files to prevent stale-config failures." },
+                                repetitions: { type: "number", description: "Print N identical copies of the model. Each copy gets its own plate placement. Example: 3 prints three copies." },
+                                orient: { type: "boolean", description: "Auto-orient the model for optimal printability (minimize supports, maximize bed adhesion). Recommended for raw STL imports that lack a pre-set orientation." },
+                                arrange: { type: "boolean", description: "Auto-arrange all objects on the build plate with optimal spacing. Recommended when importing STLs or adding multiple objects. Set false to preserve existing plate layout." },
+                                ensure_on_bed: { type: "boolean", description: "Detect models floating above the bed and lower them onto the build surface. Safety net for imported models with incorrect Z origins." },
+                                clone_objects: { type: "string", description: "Duplicate specific objects on the plate. Comma-separated clone counts per object index, e.g. '1,3,1,10' clones object 0 once, object 1 three times, etc." },
+                                skip_objects: { type: "string", description: "Skip specific objects during slicing by index. Comma-separated, e.g. '3,5,10'. Useful for multi-object 3MFs where you only want to print some parts." },
+                                load_filaments: { type: "string", description: "Override filament profiles. Semicolon-separated paths to filament JSON configs, e.g. 'pla_basic.json;petg_cf.json'." },
+                                load_filament_ids: { type: "string", description: "Map filaments to objects/parts. Comma-separated IDs matching load_filaments order, e.g. '1,2,3,1' assigns filament 1 to objects 0 and 3." },
+                                enable_timelapse: { type: "boolean", description: "Insert timelapse parking moves into gcode. The toolhead parks at a fixed position each layer for camera capture. Adds ~10% print time." },
+                                allow_mix_temp: { type: "boolean", description: "Allow filaments with different temperature requirements on the same plate. Required for multi-material prints mixing e.g. PLA and PETG." },
+                                scale: { type: "number", description: "Uniform scale factor applied to all axes. 1.0 = original size, 2.0 = double, 0.5 = half. Applied before slicing." },
+                                rotate: { type: "number", description: "Rotate the model around the Z-axis (vertical) by this many degrees before slicing. Positive = counterclockwise when viewed from above." },
+                                rotate_x: { type: "number", description: "Rotate the model around the X-axis by this many degrees before slicing. Useful for reorienting prints for better layer adhesion." },
+                                rotate_y: { type: "number", description: "Rotate the model around the Y-axis by this many degrees before slicing. Useful for reorienting prints for better layer adhesion." },
+                                min_save: { type: "boolean", description: "Write a smaller output 3MF by omitting non-essential metadata. Reduces file size for faster FTP upload to the printer." },
+                                skip_modified_gcodes: { type: "boolean", description: "Strip custom start/end gcodes embedded in the 3MF. Recommended for downloaded 3MFs since custom gcodes from other users' profiles may be unsafe for your printer." },
+                                slice_plate: { type: "number", description: "Which plate index to slice. 0 = all plates (default). Use 1, 2, etc. to slice only a specific plate in multi-plate 3MF projects." }
                             },
                             required: ["stl_path", "bambu_model"]
                         }
@@ -599,8 +617,45 @@ class BambuPrinterMCPServer {
                         const nozzleDiam = String(args?.nozzle_diameter || DEFAULT_NOZZLE_DIAMETER);
                         // Resolve printer preset for BambuStudio slicer
                         const printerPreset = BAMBU_MODEL_PRESETS[sliceModel]?.(nozzleDiam);
+                        const sliceBambuOptions = {};
+                        if (args?.uptodate !== undefined)
+                            sliceBambuOptions.uptodate = Boolean(args.uptodate);
+                        if (args?.repetitions !== undefined)
+                            sliceBambuOptions.repetitions = Number(args.repetitions);
+                        if (args?.orient !== undefined)
+                            sliceBambuOptions.orient = Boolean(args.orient);
+                        if (args?.arrange !== undefined)
+                            sliceBambuOptions.arrange = Boolean(args.arrange);
+                        if (args?.ensure_on_bed !== undefined)
+                            sliceBambuOptions.ensureOnBed = Boolean(args.ensure_on_bed);
+                        if (args?.clone_objects !== undefined)
+                            sliceBambuOptions.cloneObjects = String(args.clone_objects);
+                        if (args?.skip_objects !== undefined)
+                            sliceBambuOptions.skipObjects = String(args.skip_objects);
+                        if (args?.load_filaments !== undefined)
+                            sliceBambuOptions.loadFilaments = String(args.load_filaments);
+                        if (args?.load_filament_ids !== undefined)
+                            sliceBambuOptions.loadFilamentIds = String(args.load_filament_ids);
+                        if (args?.enable_timelapse !== undefined)
+                            sliceBambuOptions.enableTimelapse = Boolean(args.enable_timelapse);
+                        if (args?.allow_mix_temp !== undefined)
+                            sliceBambuOptions.allowMixTemp = Boolean(args.allow_mix_temp);
+                        if (args?.scale !== undefined)
+                            sliceBambuOptions.scale = Number(args.scale);
+                        if (args?.rotate !== undefined)
+                            sliceBambuOptions.rotate = Number(args.rotate);
+                        if (args?.rotate_x !== undefined)
+                            sliceBambuOptions.rotateX = Number(args.rotate_x);
+                        if (args?.rotate_y !== undefined)
+                            sliceBambuOptions.rotateY = Number(args.rotate_y);
+                        if (args?.min_save !== undefined)
+                            sliceBambuOptions.minSave = Boolean(args.min_save);
+                        if (args?.skip_modified_gcodes !== undefined)
+                            sliceBambuOptions.skipModifiedGcodes = Boolean(args.skip_modified_gcodes);
+                        if (args?.slice_plate !== undefined)
+                            sliceBambuOptions.slicePlate = Number(args.slice_plate);
                         result = await this.stlManipulator.sliceSTL(String(args.stl_path), slicerType, slicerPath, slicerProfile || undefined, undefined, // progressCallback
-                        printerPreset);
+                        printerPreset, sliceBambuOptions);
                         break;
                     }
                     case "print_3mf": {
@@ -623,8 +678,14 @@ class BambuPrinterMCPServer {
                             const hasGcode = Object.keys(zip.files).some(f => f.match(/Metadata\/plate_\d+\.gcode/i) || f.endsWith('.gcode'));
                             if (!hasGcode) {
                                 console.log(`3MF has no gcode — auto-slicing with ${slicerType} for ${printModel}`);
+                                const autoSliceOptions = {
+                                    uptodate: true,
+                                    ensureOnBed: true,
+                                    minSave: true,
+                                    skipModifiedGcodes: true,
+                                };
                                 threeMFPath = await this.stlManipulator.sliceSTL(threeMFPath, slicerType, slicerPath, slicerProfile || undefined, undefined, // progressCallback
-                                printPreset);
+                                printPreset, autoSliceOptions);
                                 console.log("Auto-sliced to: " + threeMFPath);
                             }
                         }
