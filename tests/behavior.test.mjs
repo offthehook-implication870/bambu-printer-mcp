@@ -94,7 +94,7 @@ function assertBambuStudioSlicerSupport(listToolsResult) {
   );
 }
 
-test("bambustudio slicer default and print_3mf with ams_mapping", async (t) => {
+test("printer model safety: schema requires bambu_model, rejects missing/invalid models", async (t) => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SERVER_ENTRY],
@@ -103,6 +103,7 @@ test("bambustudio slicer default and print_3mf with ams_mapping", async (t) => {
       MCP_TRANSPORT: "stdio",
       BAMBU_SERIAL: "TEST_SERIAL",
       BAMBU_TOKEN: "TEST_TOKEN",
+      BAMBU_MODEL: "", // Explicitly empty to override dotenv .env file
     },
     stderr: "pipe",
   });
@@ -115,6 +116,42 @@ test("bambustudio slicer default and print_3mf with ams_mapping", async (t) => {
   const listToolsResult = await client.listTools();
   assertBambuStudioSlicerSupport(listToolsResult);
 
+  // --- Schema validation: bambu_model must be required on print_3mf and slice_stl ---
+  const print3mfTool = listToolsResult.tools.find((t) => t.name === "print_3mf");
+  assert.ok(print3mfTool, "print_3mf tool must exist");
+  assert.ok(
+    print3mfTool.inputSchema.properties.ams_mapping,
+    "print_3mf must have ams_mapping property"
+  );
+  assert.ok(
+    print3mfTool.inputSchema.properties.bambu_model,
+    "print_3mf must have bambu_model property"
+  );
+  assert.ok(
+    print3mfTool.inputSchema.required.includes("bambu_model"),
+    "print_3mf must list bambu_model as required"
+  );
+  assert.ok(
+    print3mfTool.inputSchema.properties.bed_type,
+    "print_3mf must have bed_type property"
+  );
+  assert.deepEqual(
+    print3mfTool.inputSchema.properties.bambu_model.enum,
+    ["p1s", "p1p", "x1c", "x1e", "a1", "a1mini", "h2d"],
+    "print_3mf bambu_model must enumerate all valid models"
+  );
+
+  const sliceTool = listToolsResult.tools.find((t) => t.name === "slice_stl");
+  assert.ok(sliceTool, "slice_stl tool must exist");
+  assert.ok(
+    sliceTool.inputSchema.properties.bambu_model,
+    "slice_stl must have bambu_model property"
+  );
+  assert.ok(
+    sliceTool.inputSchema.required.includes("bambu_model"),
+    "slice_stl must list bambu_model as required"
+  );
+
   // No 'type' param should exist on any tool (Bambu-only)
   for (const tool of listToolsResult.tools) {
     assert.ok(
@@ -123,19 +160,75 @@ test("bambustudio slicer default and print_3mf with ams_mapping", async (t) => {
     );
   }
 
-  // print_3mf with missing file should error gracefully
-  const missingFile = await client.callTool({
+  // --- Runtime validation: print_3mf without bambu_model must error ---
+  // The server will attempt elicitation, which fails in test (no client support),
+  // then falls back to a clear error about bambu_model being required.
+  const noModelResult = await client.callTool({
     name: "print_3mf",
     arguments: { three_mf_path: "/tmp/nonexistent_test.3mf" },
   });
-  assert.equal(missingFile.isError, true);
-
-  // print_3mf tool schema should include ams_mapping
-  const print3mfTool = listToolsResult.tools.find((t) => t.name === "print_3mf");
-  assert.ok(print3mfTool, "print_3mf tool must exist");
+  assert.equal(noModelResult.isError, true, "print_3mf without bambu_model must error");
+  const noModelError = noModelResult.content?.[0]?.text || "";
   assert.ok(
-    print3mfTool.inputSchema.properties.ams_mapping,
-    "print_3mf must have ams_mapping property"
+    noModelError.toLowerCase().includes("bambu_model") || noModelError.toLowerCase().includes("model"),
+    `Error must mention model is required, got: ${noModelError}`
+  );
+
+  // --- Runtime validation: print_3mf with invalid model must error ---
+  const badModelResult = await client.callTool({
+    name: "print_3mf",
+    arguments: { three_mf_path: "/tmp/nonexistent_test.3mf", bambu_model: "ender3" },
+  });
+  assert.equal(badModelResult.isError, true, "print_3mf with invalid model must error");
+  const badModelError = badModelResult.content?.[0]?.text || "";
+  assert.ok(
+    badModelError.includes("Invalid bambu_model"),
+    `Error must reject invalid model, got: ${badModelError}`
+  );
+
+  // --- Runtime validation: print_3mf with valid model but missing file errors on file, not model ---
+  const validModelResult = await client.callTool({
+    name: "print_3mf",
+    arguments: { three_mf_path: "/tmp/nonexistent_test.3mf", bambu_model: "p1s" },
+  });
+  assert.equal(validModelResult.isError, true, "Missing file should still error");
+  const validModelError = validModelResult.content?.[0]?.text || "";
+  assert.ok(
+    !validModelError.includes("bambu_model"),
+    `Error with valid model should not be about model, got: ${validModelError}`
+  );
+});
+
+test("printer model safety: BAMBU_MODEL env var accepted as default", async (t) => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER_ENTRY],
+    env: {
+      ...process.env,
+      MCP_TRANSPORT: "stdio",
+      BAMBU_SERIAL: "TEST_SERIAL",
+      BAMBU_TOKEN: "TEST_TOKEN",
+      BAMBU_MODEL: "p1s",
+    },
+    stderr: "pipe",
+  });
+
+  const client = createClient();
+  t.after(async () => { await closeTransport(transport); });
+
+  await client.connect(transport);
+
+  // With BAMBU_MODEL=p1s set in env, print_3mf should NOT error about missing model
+  // (it will error about missing file instead)
+  const result = await client.callTool({
+    name: "print_3mf",
+    arguments: { three_mf_path: "/tmp/nonexistent_test.3mf" },
+  });
+  assert.equal(result.isError, true);
+  const errorText = result.content?.[0]?.text || "";
+  assert.ok(
+    !errorText.includes("bambu_model") && !errorText.includes("BAMBU_MODEL"),
+    `With BAMBU_MODEL env set, error should be about file not model, got: ${errorText}`
   );
 });
 

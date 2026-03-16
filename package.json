@@ -40,11 +40,9 @@
     "dotenv": "^16.3.1",
     "jszip": "^3.10.1",
     "three": "^0.173.0",
-    "xml2js": "^0.6.2",
-    "zod": "^3.25.76"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "@types/jszip": "^3.4.0",
     "@types/node": "^18.0.0",
     "@types/three": "^0.173.0",
     "@types/xml2js": "^0.4.14"

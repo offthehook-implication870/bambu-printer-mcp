@@ -849,6 +849,7 @@ export class STLManipulator extends EventEmitter {
    * @param slicerPath Path to the slicer executable
    * @param slicerProfile Optional path to the slicer profile/config file
    * @param progressCallback Optional callback for progress updates
+   * @param printerPreset Optional BambuStudio printer preset name (e.g., "Bambu Lab P1S 0.4 nozzle")
    * @returns Path to the generated G-code or sliced 3MF file
    */
   async sliceSTL(
@@ -856,7 +857,8 @@ export class STLManipulator extends EventEmitter {
     slicerType: 'prusaslicer' | 'cura' | 'slic3r' | 'orcaslicer' | 'bambustudio',
     slicerPath: string,
     slicerProfile?: string,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    printerPreset?: string
   ): Promise<string> {
     const operationId = this.generateOperationId();
     this.activeOperations.set(operationId, true);
@@ -938,6 +940,13 @@ export class STLManipulator extends EventEmitter {
             ];
             if (slicerProfile) {
               args.push('--load-settings', slicerProfile);
+            }
+            // CRITICAL: Pass printer preset so slicer generates correct G-code
+            // for the target printer model. Without this, the slicer uses its
+            // default which may be a completely different printer, causing
+            // dangerous bed crashes or axis limit violations.
+            if (printerPreset && !slicerProfile) {
+              args.push('--load-machine', printerPreset);
             }
             args.push(stlFilePath);
             // Override outputFilePath for bambustudio since it produces 3MF, not gcode

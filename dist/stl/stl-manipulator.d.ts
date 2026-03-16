@@ -96,9 +96,10 @@ export declare class STLManipulator extends EventEmitter {
      * @param slicerPath Path to the slicer executable
      * @param slicerProfile Optional path to the slicer profile/config file
      * @param progressCallback Optional callback for progress updates
+     * @param printerPreset Optional BambuStudio printer preset name (e.g., "Bambu Lab P1S 0.4 nozzle")
      * @returns Path to the generated G-code or sliced 3MF file
      */
-    sliceSTL(stlFilePath: string, slicerType: 'prusaslicer' | 'cura' | 'slic3r' | 'orcaslicer' | 'bambustudio', slicerPath: string, slicerProfile?: string, progressCallback?: ProgressCallback): Promise<string>;
+    sliceSTL(stlFilePath: string, slicerType: 'prusaslicer' | 'cura' | 'slic3r' | 'orcaslicer' | 'bambustudio', slicerPath: string, slicerProfile?: string, progressCallback?: ProgressCallback, printerPreset?: string): Promise<string>;
     /**
      * Enhanced version of confirmTemperatures with better error handling
      * @param gcodePath Path to the G-code file

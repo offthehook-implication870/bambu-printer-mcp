@@ -16,6 +16,36 @@ const DEFAULT_HOST = process.env.PRINTER_HOST || "localhost";
 const DEFAULT_BAMBU_SERIAL = process.env.BAMBU_SERIAL || "";
 const DEFAULT_BAMBU_TOKEN = process.env.BAMBU_TOKEN || "";
 const TEMP_DIR = process.env.TEMP_DIR || path.join(process.cwd(), "temp");
+// Printer model and bed type
+const DEFAULT_BAMBU_MODEL = process.env.BAMBU_MODEL?.trim().toLowerCase() || "";
+const DEFAULT_BED_TYPE = process.env.BED_TYPE?.trim().toLowerCase() || "textured_plate";
+const DEFAULT_NOZZLE_DIAMETER = process.env.NOZZLE_DIAMETER?.trim() || "0.4";
+const VALID_BAMBU_MODELS = ["p1s", "p1p", "x1c", "x1e", "a1", "a1mini", "h2d"];
+const VALID_BED_TYPES = ["textured_plate", "cool_plate", "engineering_plate", "hot_plate"];
+// Map model IDs to BambuStudio --load-machine preset names
+const BAMBU_MODEL_PRESETS = {
+    p1s: (n) => `Bambu Lab P1S ${n} nozzle`,
+    p1p: (n) => `Bambu Lab P1P ${n} nozzle`,
+    x1c: (n) => `Bambu Lab X1 Carbon ${n} nozzle`,
+    x1e: (n) => `Bambu Lab X1E ${n} nozzle`,
+    a1: (n) => `Bambu Lab A1 ${n} nozzle`,
+    a1mini: (n) => `Bambu Lab A1 mini ${n} nozzle`,
+    h2d: (n) => `Bambu Lab H2D ${n} nozzle`,
+};
+function validateBambuModel(model) {
+    const normalized = model.trim().toLowerCase();
+    if (!VALID_BAMBU_MODELS.includes(normalized)) {
+        throw new Error(`Invalid bambu_model: "${model}". Valid models: ${VALID_BAMBU_MODELS.join(", ")}`);
+    }
+    return normalized;
+}
+function resolveBedType(argsBedType) {
+    const bedType = (argsBedType || DEFAULT_BED_TYPE).trim().toLowerCase();
+    if (!VALID_BED_TYPES.includes(bedType)) {
+        throw new Error(`Invalid bed_type: "${bedType}". Valid types: ${VALID_BED_TYPES.join(", ")}`);
+    }
+    return bedType;
+}
 // Slicer configuration (defaults to bambustudio)
 const DEFAULT_SLICER_TYPE = process.env.SLICER_TYPE || "bambustudio";
 const DEFAULT_SLICER_PATH = process.env.SLICER_PATH || "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio";
@@ -94,6 +124,59 @@ class BambuPrinterMCPServer {
     setupHandlers() {
         this.setupResourceHandlers();
         this.setupToolHandlers();
+    }
+    /**
+     * Resolve the Bambu printer model from args, env, or by asking the user via elicitation.
+     * This is critical for safety: the wrong model can cause physical damage to the printer.
+     */
+    async resolveBambuModel(argsModel) {
+        const fromArgs = (argsModel || DEFAULT_BAMBU_MODEL).trim().toLowerCase();
+        if (fromArgs) {
+            return validateBambuModel(fromArgs);
+        }
+        // No model from args or env — ask the user via elicitation
+        try {
+            const result = await this.server.elicitInput({
+                mode: "form",
+                message: "Your Bambu Lab printer model is required for safe operation. " +
+                    "Using the wrong model can cause the bed to crash into the nozzle and damage the printer.",
+                requestedSchema: {
+                    type: "object",
+                    properties: {
+                        bambu_model: {
+                            type: "string",
+                            title: "Printer Model",
+                            description: "Which Bambu Lab printer do you have?",
+                            oneOf: [
+                                { const: "p1s", title: "P1S" },
+                                { const: "p1p", title: "P1P" },
+                                { const: "x1c", title: "X1 Carbon" },
+                                { const: "x1e", title: "X1E" },
+                                { const: "a1", title: "A1" },
+                                { const: "a1mini", title: "A1 Mini" },
+                                { const: "h2d", title: "H2D" },
+                            ],
+                        },
+                    },
+                    required: ["bambu_model"],
+                },
+            });
+            if (result.action === "accept" && result.content?.bambu_model) {
+                return validateBambuModel(String(result.content.bambu_model));
+            }
+            throw new Error("Printer model selection was cancelled. Cannot proceed without knowing the printer model.");
+        }
+        catch (elicitError) {
+            // Elicitation not supported by this client — fall back to a clear error
+            const msg = elicitError?.message || String(elicitError);
+            if (elicitError?.code === -32601 || elicitError?.code === -32600 ||
+                msg.includes("does not support") || msg.includes("elicitation")) {
+                throw new Error("bambu_model is required but your MCP client does not support elicitation. " +
+                    `Set the BAMBU_MODEL environment variable or pass bambu_model in the tool call. ` +
+                    `Valid models: ${VALID_BAMBU_MODELS.join(", ")}`);
+            }
+            throw elicitError;
+        }
     }
     setupResourceHandlers() {
         this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -234,19 +317,25 @@ class BambuPrinterMCPServer {
                     },
                     {
                         name: "slice_stl",
-                        description: "Slice an STL or 3MF file using a slicer to generate printable G-code or sliced 3MF",
+                        description: "Slice an STL or 3MF file using a slicer to generate printable G-code or sliced 3MF. IMPORTANT: bambu_model must be specified to ensure the slicer generates safe G-code for the correct printer.",
                         inputSchema: {
                             type: "object",
                             properties: {
                                 stl_path: { type: "string", description: "Path to the STL or 3MF file to slice" },
+                                bambu_model: {
+                                    type: "string",
+                                    enum: ["p1s", "p1p", "x1c", "x1e", "a1", "a1mini", "h2d"],
+                                    description: "REQUIRED: Bambu Lab printer model. Ask the user if not known. Using the wrong model can damage the printer."
+                                },
                                 slicer_type: {
                                     type: "string",
                                     description: "Type of slicer to use (bambustudio, prusaslicer, cura, slic3r, orcaslicer) (default: bambustudio)"
                                 },
                                 slicer_path: { type: "string", description: "Path to the slicer executable (default: value from env)" },
-                                slicer_profile: { type: "string", description: "Path to the slicer profile/config file (optional)" }
+                                slicer_profile: { type: "string", description: "Path to the slicer profile/config file (optional, overrides bambu_model preset)" },
+                                nozzle_diameter: { type: "string", description: "Nozzle diameter in mm (default: 0.4)" }
                             },
-                            required: ["stl_path"]
+                            required: ["stl_path", "bambu_model"]
                         }
                     },
                     {
@@ -335,25 +424,37 @@ class BambuPrinterMCPServer {
                     },
                     {
                         name: "print_3mf",
-                        description: "Print a 3MF file on a Bambu Lab printer. Auto-slices if the 3MF has no gcode.",
+                        description: "Print a 3MF file on a Bambu Lab printer. Auto-slices if the 3MF has no gcode. IMPORTANT: bambu_model must be specified to ensure safe printer operation.",
                         inputSchema: {
                             type: "object",
                             properties: {
                                 three_mf_path: { type: "string", description: "Path to the 3MF file to print" },
+                                bambu_model: {
+                                    type: "string",
+                                    enum: ["p1s", "p1p", "x1c", "x1e", "a1", "a1mini", "h2d"],
+                                    description: "REQUIRED: Bambu Lab printer model. Ask the user if not known. Using the wrong model can damage the printer."
+                                },
+                                bed_type: {
+                                    type: "string",
+                                    enum: ["textured_plate", "cool_plate", "engineering_plate", "hot_plate"],
+                                    description: "Bed plate type currently installed (default: textured_plate)"
+                                },
                                 host: { type: "string", description: "Hostname or IP of the printer (default: value from env)" },
                                 bambu_serial: { type: "string", description: "Serial number (default: value from env)" },
                                 bambu_token: { type: "string", description: "Access token (default: value from env)" },
-                                layer_height: { type: "number", description: "Override layer height (mm)" },
-                                nozzle_temperature: { type: "number", description: "Override nozzle temperature (°C)" },
-                                bed_temperature: { type: "number", description: "Override bed temperature (°C)" },
-                                support_enabled: { type: "boolean", description: "Override support generation" },
+                                use_ams: { type: "boolean", description: "Whether to use the AMS (default: auto-detect from 3MF)" },
                                 ams_mapping: {
-                                    type: "object",
-                                    description: "Override AMS filament mapping (e.g., {\"Generic PLA\": 0})",
-                                    additionalProperties: { type: "number" }
-                                }
+                                    type: "array",
+                                    description: "AMS slot mapping array, e.g. [0, 2] maps filaments to AMS slots 0 and 2",
+                                    items: { type: "number" }
+                                },
+                                bed_leveling: { type: "boolean", description: "Enable auto bed leveling (default: true)" },
+                                flow_calibration: { type: "boolean", description: "Enable flow calibration (default: true)" },
+                                vibration_calibration: { type: "boolean", description: "Enable vibration calibration (default: true)" },
+                                timelapse: { type: "boolean", description: "Enable timelapse recording (default: false)" },
+                                nozzle_diameter: { type: "string", description: "Nozzle diameter in mm for auto-slicing (default: 0.4)" }
                             },
-                            required: ["three_mf_path"]
+                            required: ["three_mf_path", "bambu_model"]
                         }
                     },
                     {
@@ -490,12 +591,18 @@ class BambuPrinterMCPServer {
                         }
                         result = await this.stlManipulator.getSTLInfo(String(args.stl_path));
                         break;
-                    case "slice_stl":
+                    case "slice_stl": {
                         if (!args?.stl_path) {
                             throw new Error("Missing required parameter: stl_path");
                         }
-                        result = await this.stlManipulator.sliceSTL(String(args.stl_path), slicerType, slicerPath, slicerProfile || undefined);
+                        const sliceModel = await this.resolveBambuModel(args?.bambu_model);
+                        const nozzleDiam = String(args?.nozzle_diameter || DEFAULT_NOZZLE_DIAMETER);
+                        // Resolve printer preset for BambuStudio slicer
+                        const printerPreset = BAMBU_MODEL_PRESETS[sliceModel]?.(nozzleDiam);
+                        result = await this.stlManipulator.sliceSTL(String(args.stl_path), slicerType, slicerPath, slicerProfile || undefined, undefined, // progressCallback
+                        printerPreset);
                         break;
+                    }
                     case "print_3mf": {
                         if (!args?.three_mf_path) {
                             throw new Error("Missing required parameter: three_mf_path");
@@ -503,6 +610,10 @@ class BambuPrinterMCPServer {
                         if (!bambuSerial || !bambuToken) {
                             throw new Error("Bambu serial number and access token are required for print_3mf.");
                         }
+                        const printModel = await this.resolveBambuModel(args?.bambu_model);
+                        const printBedType = resolveBedType(args?.bed_type);
+                        const printNozzle = String(args?.nozzle_diameter || DEFAULT_NOZZLE_DIAMETER);
+                        const printPreset = BAMBU_MODEL_PRESETS[printModel]?.(printNozzle);
                         let threeMFPath = String(args.three_mf_path);
                         // Auto-slice if 3MF has no gcode
                         try {
@@ -511,8 +622,9 @@ class BambuPrinterMCPServer {
                             const zip = await JSZip.loadAsync(zipData);
                             const hasGcode = Object.keys(zip.files).some(f => f.match(/Metadata\/plate_\d+\.gcode/i) || f.endsWith('.gcode'));
                             if (!hasGcode) {
-                                console.log("3MF has no gcode — auto-slicing with " + slicerType);
-                                threeMFPath = await this.stlManipulator.sliceSTL(threeMFPath, slicerType, slicerPath, slicerProfile || undefined);
+                                console.log(`3MF has no gcode — auto-slicing with ${slicerType} for ${printModel}`);
+                                threeMFPath = await this.stlManipulator.sliceSTL(threeMFPath, slicerType, slicerPath, slicerProfile || undefined, undefined, // progressCallback
+                                printPreset);
                                 console.log("Auto-sliced to: " + threeMFPath);
                             }
                         }
@@ -560,6 +672,7 @@ class BambuPrinterMCPServer {
                             plateIndex: 0,
                             useAMS: useAMS,
                             amsMapping: finalAmsMapping,
+                            bedType: printBedType,
                             bedLeveling: args?.bed_leveling !== undefined ? Boolean(args.bed_leveling) : undefined,
                             flowCalibration: args?.flow_calibration !== undefined ? Boolean(args.flow_calibration) : undefined,
                             vibrationCalibration: args?.vibration_calibration !== undefined ? Boolean(args.vibration_calibration) : undefined,
